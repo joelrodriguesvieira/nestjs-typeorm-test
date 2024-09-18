@@ -4,12 +4,13 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { User } from '@prisma/client';
-import { PrismaService } from 'src/prisma/prisma.service';
 import { AuthRegisterDTO } from './dto/auth-register.dto';
-import { UserService } from 'src/user/user.service';
 import * as bcrypt from 'bcrypt';
 import { MailerService } from '@nestjs-modules/mailer';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { UserService } from '../user/user.service';
+import { UserEntity } from '../user/entity/user.entity';
 
 @Injectable()
 export class AuthService {
@@ -17,12 +18,13 @@ export class AuthService {
   private audience = 'users';
   constructor(
     private readonly jwtService: JwtService,
-    private readonly prisma: PrismaService,
     private readonly userService: UserService,
     private readonly mailer: MailerService,
+    @InjectRepository(UserEntity)
+    private usersRepository: Repository<UserEntity>,
   ) {}
 
-  createToken(user: User) {
+  createToken(user: UserEntity) {
     return {
       accessToken: this.jwtService.sign(
         {
@@ -62,10 +64,8 @@ export class AuthService {
   }
 
   async login(email: string, password: string) {
-    const user = await this.prisma.user.findFirst({
-      where: {
-        email,
-      },
+    const user = await this.usersRepository.findOneBy({
+      email,
     });
 
     if (!user) {
@@ -80,10 +80,8 @@ export class AuthService {
   }
 
   async forget(email: string) {
-    const user = await this.prisma.user.findFirst({
-      where: {
-        email,
-      },
+    const user = await this.usersRepository.findOneBy({
+      email,
     });
     if (!user) {
       throw new UnauthorizedException('Email está incorreto.');
@@ -113,7 +111,7 @@ export class AuthService {
 
   async reset(newPassword: string, token: string) {
     try {
-      const data:any = this.jwtService.verify(token, {
+      const data: any = this.jwtService.verify(token, {
         issuer: 'forget',
         audience: 'users',
       });
@@ -125,25 +123,21 @@ export class AuthService {
       const salt = await bcrypt.genSalt();
       newPassword = await bcrypt.hash(newPassword, salt);
 
-      const user = await this.prisma.user.update({
-        where: {
-          id: Number(data.id),
-        },
-        data: {
-          password: newPassword,
-        },
+      await this.usersRepository.update(Number(data.id), {
+        password: newPassword,
       });
 
-      return this.createToken(user);
+      const user = await this.userService.show(Number(data.id));
 
+      return this.createToken(user);
     } catch (e) {
       throw new BadRequestException(e);
     }
   }
 
   async register(data: AuthRegisterDTO) {
+    delete data.role;
     const user = await this.userService.create(data);
-
     return this.createToken(user);
   }
 }

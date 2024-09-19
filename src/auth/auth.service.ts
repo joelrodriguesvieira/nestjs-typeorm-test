@@ -106,7 +106,7 @@ export class AuthService {
         token,
       },
     });
-    return true;
+    return { success: true };
   }
 
   async reset(newPassword: string, token: string) {
